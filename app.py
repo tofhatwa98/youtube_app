@@ -1,139 +1,62 @@
-import os
-import re
-import shutil
-import tempfile
-from datetime import datetime
-from flask import (
-    Flask, request, render_template, send_file,
-    redirect, url_for, flash
-)
+from flask import Flask, render_template, request, send_file, redirect, url_for, flash
 from pytubefix import YouTube
+from pytubefix.cli import on_progress
+import tempfile
+import os
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "supersecret")
-
-# --- Tunables ---
-MAX_BYTES = 100 * 1024 * 1024   # ~100 MB safeguard
-DEFAULT_RES_ORDER = ["720p", "480p", "360p", "240p"]
-ALLOWED_RES = ["best"] + DEFAULT_RES_ORDER
-
-
-def safe_filename(name: str, default: str = "download"):
-    """Sanitize filename for filesystem."""
-    name = name or default
-    name = re.sub(r"[^\w\-\.\s\(\)\[\]]+", "", name).strip()
-    return name or default
-
-
-def pick_progressive_stream(yt: YouTube, target_res: str):
-    streams = yt.streams.filter(progressive=True, file_extension="mp4")
-    if not streams:
-        return None
-    if target_res == "best":
-        return streams.order_by("resolution").desc().first()
-    try:
-        start_idx = DEFAULT_RES_ORDER.index(target_res)
-    except ValueError:
-        start_idx = 0
-    for res in DEFAULT_RES_ORDER[start_idx:]:
-        s = streams.filter(res=res).order_by("fps").desc().first()
-        if s:
-            return s
-    return streams.order_by("resolution").desc().first()
-
-
-def pick_audio_stream(yt: YouTube):
-    return yt.streams.filter(only_audio=True).order_by("abr").desc().first()
-
-
-def estimate_size_bytes(stream):
-    return getattr(stream, "filesize", None) or getattr(stream, "filesize_approx", None)
-
-
-def get_youtube_obj(url: str) -> YouTube:
-    """Return YouTube object, handling PoToken depending on version."""
-    po_token = os.environ.get("PO_TOKEN")
-
-    try:
-        if po_token:
-            # New API prefers po_token directly
-            return YouTube(url, po_token=po_token)
-        else:
-            # Fallback to WEB client
-            return YouTube(url, client="WEB")
-    except TypeError:
-        # Older versions fallback
-        if po_token:
-            return YouTube(url, po_token=po_token)
-        return YouTube(url, use_po_token=True)
-
+app.secret_key = "your_secret_key_here"  # needed for flash messages
 
 @app.route("/", methods=["GET", "POST"])
 def index():
     if request.method == "POST":
-        url = (request.form.get("url") or "").strip()
-        mode = (request.form.get("mode") or "video").lower()
-        target_res = (request.form.get("resolution") or "best").lower()
+        url = request.form.get("url")
+        download_type = request.form.get("type")
+        min_resolution = request.form.get("resolution", type=int)
 
         if not url:
             flash("Please enter a YouTube URL.")
             return redirect(url_for("index"))
 
-        if not (url.startswith("http://") or url.startswith("https://")):
-            flash("Invalid URL. Please include http(s)://")
-            return redirect(url_for("index"))
-
         try:
-            yt = get_youtube_obj(url)
+            yt = YouTube(url, on_progress_callback=on_progress)
         except Exception as e:
-            flash(f"Failed to initialize YouTube object: {e}")
+            flash(f"Error loading video: {e}")
             return redirect(url_for("index"))
 
+        # Temporary directory to store the download
+        temp_dir = tempfile.mkdtemp()
+        
         try:
-            if mode == "audio":
-                stream = pick_audio_stream(yt)
+            if download_type == "audio":
+                streams = yt.streams.filter(only_audio=True).order_by('abr').desc()
+                if not streams:
+                    flash("No audio streams available.")
+                    return redirect(url_for("index"))
+                stream = streams.first()
+                filename = f"{yt.title}.mp3"
             else:
-                if target_res not in ALLOWED_RES:
-                    target_res = "best"
-                stream = pick_progressive_stream(yt, target_res)
+                # Video download with minimum resolution
+                streams = [
+                    s for s in yt.streams.filter(progressive=True, file_extension="mp4")
+                    if s.resolution and int(s.resolution[:-1]) >= (min_resolution or 480)
+                ]
+                if not streams:
+                    flash(f"No video streams available with at least {min_resolution}p resolution.")
+                    return redirect(url_for("index"))
+                # Pick highest available resolution
+                stream = max(streams, key=lambda s: int(s.resolution[:-1]))
+                filename = f"{yt.title}.mp4"
 
-            if not stream:
-                flash("No suitable stream found. Try audio-only.")
-                return redirect(url_for("index"))
-
-            est = estimate_size_bytes(stream)
-            if est and est > MAX_BYTES:
-                mb = round(est / (1024 * 1024), 1)
-                flash(f"Stream too large (~{mb} MB). Try a lower resolution or audio-only.")
-                return redirect(url_for("index"))
-
-            tmpdir = tempfile.mkdtemp(prefix="yt_")
-            title = safe_filename(yt.title, default="video")
-            timestamp = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
-
-            if mode == "audio":
-                mime = (stream.mime_type or "audio/webm").lower()
-                ext = ".webm" if "webm" in mime else ".m4a"
-                fname = f"{title}_{timestamp}{ext}"
-            else:
-                fname = f"{title}_{timestamp}.mp4"
-
-            filepath = stream.download(output_path=tmpdir, filename=fname)
-
-            response = send_file(filepath, as_attachment=True, download_name=fname)
-
-            @response.call_on_close
-            def cleanup():
-                shutil.rmtree(tmpdir, ignore_errors=True)
-
-            return response
+            file_path = stream.download(output_path=temp_dir, filename=filename)
+            return send_file(file_path, as_attachment=True)
 
         except Exception as e:
-            flash(f"Download failed: {e}")
+            flash(f"Error downloading: {e}")
             return redirect(url_for("index"))
 
-    return render_template("index.html", allowed_res=ALLOWED_RES)
+    return render_template("index.html")
 
 
 if __name__ == "__main__":
-    app.run()
+    app.run(debug=True)
