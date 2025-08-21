@@ -6,3 +6,4 @@ services:
     startCommand: "gunicorn app:app"
     plan: free
     region: frankfurt  # or oregon/dublin depending on location
+ 
