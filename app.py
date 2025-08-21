@@ -51,11 +51,21 @@ def estimate_size_bytes(stream):
 
 
 def get_youtube_obj(url: str) -> YouTube:
-    """Return YouTube object, trying env PO_TOKEN first, fallback to Node.js po_token."""
+    """Return YouTube object, handling PoToken depending on version."""
     po_token = os.environ.get("PO_TOKEN")
-    if po_token:
-        return YouTube(url, po_token=po_token)
-    return YouTube(url, use_po_token=True)
+
+    try:
+        if po_token:
+            # New API prefers po_token directly
+            return YouTube(url, po_token=po_token)
+        else:
+            # Fallback to WEB client
+            return YouTube(url, client="WEB")
+    except TypeError:
+        # Older versions fallback
+        if po_token:
+            return YouTube(url, po_token=po_token)
+        return YouTube(url, use_po_token=True)
 
 
 @app.route("/", methods=["GET", "POST"])
