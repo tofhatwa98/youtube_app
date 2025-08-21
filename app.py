@@ -1,34 +1,35 @@
-from flask import Flask, request, jsonify, send_file
+from flask import Flask, request, render_template, send_file, redirect, url_for, flash
 from pytubefix import YouTube
-import os
 import tempfile
+import os
 
 app = Flask(__name__)
+app.secret_key = "supersecret"  # required for flash messages
 
-@app.route("/")
-def home():
-    return jsonify({"message": "YouTube API is running!"})
 
-@app.route("/download", methods=["GET"])
-def download_video():
-    url = request.args.get("url")
-    if not url:
-        return jsonify({"error": "Missing 'url' parameter"}), 400
+@app.route("/", methods=["GET", "POST"])
+def index():
+    if request.method == "POST":
+        youtube_url = request.form.get("url")
 
-    try:
-        # ✅ Fix for YouTube anti-bot detection
-        yt = YouTube(url, use_po_token=True)
-        stream = yt.streams.get_highest_resolution()
+        if not youtube_url:
+            flash("Please enter a YouTube URL.")
+            return redirect(url_for("index"))
 
-        # Save to a temporary directory
-        temp_dir = tempfile.mkdtemp()
-        filepath = stream.download(output_path=temp_dir)
+        try:
+            # ✅ pytubefix with anti-bot fix
+            yt = YouTube(youtube_url, use_po_token=True)
+            stream = yt.streams.get_highest_resolution()
 
-        return send_file(filepath, as_attachment=True)
+            # Save to a temporary directory
+            temp_dir = tempfile.mkdtemp()
+            filepath = stream.download(output_path=temp_dir, filename="video.mp4")
 
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+            return send_file(filepath, as_attachment=True)
 
-if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+        except Exception as e:
+            flash(f"Download failed: {str(e)}")
+            return redirect(url_for("index"))
+
+    return render_template("index.html")
 
