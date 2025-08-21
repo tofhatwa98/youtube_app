@@ -5,6 +5,10 @@ import tempfile
 
 app = Flask(__name__)
 
+@app.route("/")
+def home():
+    return jsonify({"message": "YouTube API is running!"})
+
 @app.route("/download", methods=["GET"])
 def download_video():
     url = request.args.get("url")
@@ -12,10 +16,11 @@ def download_video():
         return jsonify({"error": "Missing 'url' parameter"}), 400
 
     try:
-        yt = YouTube(url)
+        # ✅ Fix for YouTube anti-bot detection
+        yt = YouTube(url, use_po_token=True)
         stream = yt.streams.get_highest_resolution()
 
-        # Create a temp file
+        # Save to a temporary directory
         temp_dir = tempfile.mkdtemp()
         filepath = stream.download(output_path=temp_dir)
 
@@ -24,11 +29,6 @@ def download_video():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
-@app.route("/")
-def home():
-    return jsonify({"message": "YouTube API is running!"})
-
-
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000)
+
