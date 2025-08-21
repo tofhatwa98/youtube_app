@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>YouTube Downloader</title>
+</head>
+<body>
+    <h1>YouTube Downloader</h1>
+    {% with messages = get_flashed_messages() %}
+      {% if messages %}
+        <ul style="color:red;">
+          {% for message in messages %}
+            <li>{{ message }}</li>
+          {% endfor %}
+        </ul>
+      {% endif %}
+    {% endwith %}
+    <form method="POST">
+        <label>YouTube URL:</label><br>
+        <input type="text" name="url" size="50" required><br><br>
+
+        <label>Download Type:</label><br>
+        <input type="radio" name="type" value="video" checked> Video
+        <input type="radio" name="type" value="audio"> Audio<br><br>
+
+        <label>Minimum Resolution (for video, optional, default 480):</label><br>
+        <input type="number" name="resolution" min="144" max="2160"><br><br>
+
+        <input type="submit" value="Download">
+    </form>
+</body>
+</html>
